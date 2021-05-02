@@ -1,5 +1,4 @@
-use std::{convert::TryFrom, str::FromStr};
-
+use std::{convert::TryFrom, str::FromStr, fmt};
 use socha_client_base::{error::SCError, util::HasOpponent, util::SCResult};
 
 /// A player color in the game.
@@ -46,16 +45,16 @@ impl From<PlayerColor> for char {
     fn from(color: PlayerColor) -> char {
         match color {
             PlayerColor::Red => 'R',
-            PlayerColor::Blue => 'B'
+            PlayerColor::Blue => 'B',
         }
     }
 }
 
-impl From<PlayerColor> for String {
-    fn from(color: PlayerColor) -> String {
-        match color {
-            PlayerColor::Red => "RED",
-            PlayerColor::Blue => "BLUE"
-        }.to_owned()
+impl fmt::Display for PlayerColor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Red => write!(f, "RED"),
+            Self::Blue => write!(f, "BLUE"),
+        }
     }
 }

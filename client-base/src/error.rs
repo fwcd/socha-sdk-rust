@@ -1,8 +1,6 @@
 use std::io::Error as IoError;
 use std::str::ParseBoolError;
 use std::num::{ParseIntError, ParseFloatError};
-use xml::reader::Error as XmlReaderError;
-use xml::writer::Error as XmlWriterError;
 
 /// A custom error type that abstracts over
 /// other errors (such as IO/XML errors) and
@@ -11,8 +9,6 @@ use xml::writer::Error as XmlWriterError;
 #[derive(Debug)]
 pub enum SCError {
     Io(IoError),
-    XmlReader(XmlReaderError),
-    XmlWriter(XmlWriterError),
     ParseInt(ParseIntError),
     ParseFloat(ParseFloatError),
     ParseBool(ParseBoolError),
@@ -21,14 +17,6 @@ pub enum SCError {
 
 impl From<IoError> for SCError {
     fn from(error: IoError) -> Self { Self::Io(error) }
-}
-
-impl From<XmlReaderError> for SCError {
-    fn from(error: XmlReaderError) -> Self { Self::XmlReader(error) }
-}
-
-impl From<XmlWriterError> for SCError {
-    fn from(error: XmlWriterError) -> Self { Self::XmlWriter(error) }
 }
 
 impl From<ParseIntError> for SCError {

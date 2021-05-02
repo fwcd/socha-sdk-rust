@@ -1,17 +1,9 @@
-use crate::{util::SCResult, xml_node::FromXmlNode, xml_node::XmlNode};
-
+use serde::{Serialize, Deserialize};
 use super::ScoreFragment;
 
 /// The definition of a score.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScoreDefinition {
+    #[serde(rename = "fragment")]
     pub fragments: Vec<ScoreFragment>
-}
-
-impl FromXmlNode for ScoreDefinition {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        Ok(Self {
-            fragments: node.childs_by_name("fragment").map(ScoreFragment::from_node).collect::<SCResult<_>>()?
-        })
-    }
 }

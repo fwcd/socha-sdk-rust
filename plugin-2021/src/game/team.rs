@@ -1,6 +1,6 @@
 use std::{fmt, str::FromStr};
 
-use socha_client_base::{error::SCError, util::HasOpponent, util::SCResult, xml_node::FromXmlNode, xml_node::XmlNode};
+use socha_client_base::{error::SCError, util::{HasOpponent, SCResult}};
 
 /// A player's team.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -62,11 +62,5 @@ impl fmt::Display for Team {
             Team::One => write!(f, "ONE"),
             Team::Two => write!(f, "TWO")
         }
-    }
-}
-
-impl FromXmlNode for Team {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        node.content().parse()
     }
 }

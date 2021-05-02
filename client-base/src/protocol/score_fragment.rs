@@ -1,21 +1,13 @@
-use crate::{util::SCResult, xml_node::{FromXmlNode, XmlNode}};
-
+use serde::{Serialize, Deserialize};
 use super::ScoreAggregation;
+use crate::util::serde_as_wrapped_value;
 
 /// A single score fragment.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScoreFragment {
     pub name: String,
+    #[serde(with = "serde_as_wrapped_value")]
     pub aggregation: ScoreAggregation,
-    pub relevant_for_ranking: bool
-}
-
-impl FromXmlNode for ScoreFragment {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        Ok(Self {
-            name: node.attribute("name")?.to_owned(),
-            aggregation: node.child_by_name("aggregation")?.content().parse()?,
-            relevant_for_ranking: node.child_by_name("relevantForRanking")?.content().parse()?
-        })
-    }
+    pub relevant_for_ranking: bool,
 }

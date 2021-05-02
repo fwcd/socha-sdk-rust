@@ -1,28 +1,84 @@
-use std::{convert::TryFrom, fmt, str::FromStr};
+use std::{convert::TryFrom, fmt, iter::empty};
 
 use regex::Regex;
-use socha_client_base::{error::SCError, util::SCResult, xml_node::FromXmlNode, xml_node::XmlNode};
+use serde::{Serialize, Deserialize};
+use socha_client_base::{error::SCError, util::SCResult};
 use lazy_static::lazy_static;
 
 use super::{Piece, PieceType, PlayerColor};
+use crate::util::{AxialCoords, CubeCoords, DoubledCoords};
+
+lazy_static! {
+    /// The syntax used for fields when parsing
+    /// ASCII hex grid fields.
+    static ref FIELD_SYNTAX: Regex = Regex::new(r"^([A-Z])([A-Z])$").unwrap();
+}
 
 /// A field on the game board.
-/// 
-/// Note that the field structure intentionally does _not_
-/// store a position. If this is desired, you should use
-/// `PositionedField` or a tuple, depending on whether you
-/// want to express ownership over the field.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Field {
-    piece_stack: Vec<Piece>,
+    // Unpacked cube coords
+    x: i32,
+    y: i32,
+    z: i32,
+    /// The piece stack.
+    #[serde(rename = "piece")]
+    pieces: Vec<Piece>,
     is_obstructed: bool
 }
 
 impl Field {
     /// Creates a new field.
-    pub fn new(piece_stack: impl IntoIterator<Item=Piece>, is_obstructed: bool) -> Self {
-        Self { piece_stack: piece_stack.into_iter().collect(), is_obstructed: is_obstructed }
+    pub fn new(coords: impl Into<CubeCoords>, pieces: impl IntoIterator<Item=Piece>, is_obstructed: bool) -> Self {
+        let cube_coords = coords.into();
+        Self {
+            x: cube_coords.x,
+            y: cube_coords.y,
+            z: cube_coords.z,
+            pieces: pieces.into_iter().collect(),
+            is_obstructed
+        }
     }
+
+    /// Creates a new field at the given position.
+    pub fn from_coords(coords: impl Into<CubeCoords>) -> Self {
+        Self::new(coords, empty(), false)
+    }
+
+    /// Converts a field in a two-character notation
+    /// to a field. The first character denotes the
+    /// player color and the second character describes the
+    /// piece type.
+    /// 
+    /// Obstructed fields and piece stacks are not (yet)
+    /// supported.
+    pub fn from_short(coords: impl Into<CubeCoords>, raw: &str) -> SCResult<Self> {
+        if raw.is_empty() {
+            Ok(Self::new(coords, Vec::new(), false))
+        } else {
+            let groups = FIELD_SYNTAX.captures(raw).ok_or_else(|| SCError::from(format!("{} does not match field syntax {}", raw, FIELD_SYNTAX.as_str())))?;
+            let owner = PlayerColor::try_from(groups[1].chars().next().unwrap())?;
+            let piece_type = PieceType::try_from(groups[2].chars().next().unwrap())?;
+            let piece = Piece { piece_type, owner };
+            Ok(Self::new(coords, vec![piece], false))
+        }
+    }
+
+    /// Fetches the coordinates of the field.
+    pub fn coords<C>(&self) -> C where C: From<CubeCoords> { CubeCoords::new(self.x, self.y, self.z).into() }
+
+    /// Fetches the axial coordinates of the field.
+    #[inline]
+    pub fn axial_coords(&self) -> AxialCoords { self.coords() }
+
+    /// Fetches the cube coordinates of the field.
+    #[inline]
+    pub fn cube_coords(&self) -> CubeCoords { self.coords() }
+
+    /// Fetches the doubled coordinates of the field.
+    #[inline]
+    pub fn doubled_coords(&self) -> DoubledCoords { self.coords() }
 
     /// Fetches the player color "owning" the field.
     pub fn owner(&self) -> Option<PlayerColor> { self.piece().map(|p| p.owner) }
@@ -45,53 +101,24 @@ impl Field {
     
     /// Fetches the top-most piece.
     #[inline]
-    pub fn piece(&self) -> Option<Piece> { self.piece_stack.last().cloned() }
+    pub fn piece(&self) -> Option<Piece> { self.pieces.last().cloned() }
     
     /// Tests whether the field contains pieces.
     #[inline]
-    pub fn has_pieces(&self) -> bool { !self.piece_stack.is_empty() }
+    pub fn has_pieces(&self) -> bool { !self.pieces.is_empty() }
     
     /// Fetches the piece stack.
     #[inline]
-    pub fn piece_stack(&self) -> &Vec<Piece> { &self.piece_stack }
+    pub fn pieces(&self) -> &Vec<Piece> { &self.pieces }
     
     /// Pushes a piece onto the piece stack.
     #[inline]
-    pub fn push(&mut self, piece: Piece) { self.piece_stack.push(piece) }
+    pub fn push(&mut self, piece: Piece) { self.pieces.push(piece) }
     
     /// Pops a piece from the piece stack or
     /// returns `None` if the stack is empty.
     #[inline]
-    pub fn pop(&mut self) -> Option<Piece> { self.piece_stack.pop() }
-}
-
-lazy_static! {
-    /// The syntax used for fields when parsing
-    /// ASCII hex grid fields.
-    static ref FIELD_SYNTAX: Regex = Regex::new(r"^([A-Z])([A-Z])$").unwrap();
-}
-
-impl FromStr for Field {
-    type Err = SCError;
-    
-    /// Converts a field in a two-character notation
-    /// to a field. The first character denotes the
-    /// player color and the second character describes the
-    /// piece type.
-    /// 
-    /// Obstructed fields and piece stacks are not (yet)
-    /// supported.
-    fn from_str(raw: &str) -> SCResult<Self> {
-        if raw.is_empty() {
-            Ok(Self::default())
-        } else {
-            let groups = FIELD_SYNTAX.captures(raw).ok_or_else(|| SCError::from(format!("{} does not match field syntax {}", raw, FIELD_SYNTAX.as_str())))?;
-            let owner = PlayerColor::try_from(groups[1].chars().next().unwrap())?;
-            let piece_type = PieceType::try_from(groups[2].chars().next().unwrap())?;
-            let piece = Piece { piece_type: piece_type, owner: owner };
-            Ok(Self { piece_stack: vec![piece], is_obstructed: false })
-        }
-    }
+    pub fn pop(&mut self) -> Option<Piece> { self.pieces.pop() }
 }
 
 impl fmt::Display for Field {
@@ -101,14 +128,5 @@ impl fmt::Display for Field {
         } else {
             write!(f, "[]")
         }
-    }
-}
-
-impl FromXmlNode for Field {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        Ok(Self {
-            piece_stack: node.childs_by_name("piece").map(Piece::from_node).collect::<Result<_, _>>()?,
-            is_obstructed: node.attribute("isObstructed")?.parse()?
-        })
     }
 }

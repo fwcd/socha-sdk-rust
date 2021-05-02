@@ -1,7 +1,11 @@
-use std::str::FromStr;
+use serde::{Serialize, Deserialize};
+
+// TODO: Serialize may not serialize correctly to an attribute yet
+// due to https://github.com/tafia/quick-xml/issues/283
 
 /// Determines the cause of a game score.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ScoreCause {
     Regular,
     Left,
@@ -9,20 +13,4 @@ pub enum ScoreCause {
     SoftTimeout,
     HardTimeout,
     Unknown
-}
-
-impl FromStr for ScoreCause {
-    type Err = String;
-
-    fn from_str(raw: &str) -> Result<Self, String> {
-        match raw {
-            "REGULAR" => Ok(Self::Regular),
-            "LEFT" => Ok(Self::Left),
-            "RULE_VIOLATION" => Ok(Self::RuleViolation),
-            "SOFT_TIMEOUT" => Ok(Self::SoftTimeout),
-            "HARD_TIMEOUT" => Ok(Self::HardTimeout),
-            "UNKNOWN" => Ok(Self::Unknown),
-            _ => Err(format!("Unknown score cause: {}", raw))
-        }
-    }
 }

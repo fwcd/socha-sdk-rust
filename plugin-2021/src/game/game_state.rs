@@ -1,12 +1,14 @@
-use std::{collections::{HashMap, HashSet}, iter::once};
+use serde::{Serialize, Deserialize};
+use std::iter::once;
 
-use socha_client_base::{util::SCResult, xml_node::{FromXmlNode, XmlNode}};
+use socha_client_base::util::{SCResult, serde_as_wrapped_value};
 
-use super::{BOARD_SIZE, Board, CORNERS, Color, Move, PIECE_SHAPES, PIECE_SHAPES_BY_NAME, Piece, PieceShape, Player, Team, Vec2};
+use super::{BOARD_SIZE, Board, CORNERS, Color, Colors, Move, PIECE_SHAPES, Piece, PieceShape, PieceShapes, Player, Team, Vec2};
 
 /// A snapshot of the game's state. It holds the
 /// information needed to compute the next move.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GameState {
     /// The number of already committed moves.
     pub turn: u32,
@@ -19,25 +21,29 @@ pub struct GameState {
     /// The current game board.
     pub board: Board,
     /// The piece that has to be placed in the first round.
+    #[serde(with = "serde_as_wrapped_value")]
     pub start_piece: PieceShape,
     /// The color that begins the game.
+    #[serde(with = "serde_as_wrapped_value")]
     pub start_color: Color,
     /// The team that begins the game.
+    #[serde(with = "serde_as_wrapped_value")]
     pub start_team: Team,
     /// A list of all colors currently in the game.
-    pub ordered_colors: Vec<Color>,
-    /// A map that stores, for each color, whether the last move was a monomino if all pieces have been placed.
-    pub last_move_mono: HashMap<Color, bool>,
+    pub ordered_colors: Colors,
+    // TODO:
+    // /// A map that stores, for each color, whether the last move was a monomino if all pieces have been placed.
+    // pub last_move_mono: HashMap<Color, bool>,
     /// The current color's index
     pub current_color_index: u32,
     /// The undeployed blue shapes.
-    pub blue_shapes: HashSet<PieceShape>,
+    pub blue_shapes: PieceShapes,
     /// The undeployed yellow shapes.
-    pub yellow_shapes: HashSet<PieceShape>,
+    pub yellow_shapes: PieceShapes,
     /// The undeployed red shapes.
-    pub red_shapes: HashSet<PieceShape>,
+    pub red_shapes: PieceShapes,
     /// The undeployed green shapes.
-    pub green_shapes: HashSet<PieceShape>
+    pub green_shapes: PieceShapes
 }
 
 const SUM_MAX_SQUARES: i32 = 89;
@@ -55,8 +61,8 @@ impl GameState {
             start_piece,
             start_color: Color::Blue,
             start_team: Team::One,
-            ordered_colors: vec![Color::Blue, Color::Yellow, Color::Red, Color::Green],
-            last_move_mono: HashMap::new(),
+            ordered_colors: [Color::Blue, Color::Yellow, Color::Red, Color::Green].iter().cloned().collect(),
+            // last_move_mono: HashMap::new(),
             current_color_index: 0,
             blue_shapes: PIECE_SHAPES.iter().cloned().collect(),
             yellow_shapes: PIECE_SHAPES.iter().cloned().collect(),
@@ -96,7 +102,7 @@ impl GameState {
     }
 
     /// Fetches the undeployed piece shapes of a given color mutably.
-    pub fn undeployed_shapes_of_color_mut(&mut self, color: Color) -> &mut HashSet<PieceShape> {
+    pub fn undeployed_shapes_of_color_mut(&mut self, color: Color) -> &mut PieceShapes {
         match color {
             Color::Red => &mut self.red_shapes,
             Color::Yellow => &mut self.yellow_shapes,
@@ -110,7 +116,7 @@ impl GameState {
     // https://github.com/CAU-Kiel-Tech-Inf/backend/blob/97d185660754ffba4bd4444f3f39ae350f1d053e/plugin/src/shared/sc/plugin2021/util/GameRuleLogic.kt
 
     /// Computes the points from the given, undeployed piece shapes.
-    pub fn get_points_from_undeployed(undeployed: HashSet<PieceShape>, mono_last: bool) -> i32 {
+    pub fn get_points_from_undeployed(undeployed: PieceShapes, mono_last: bool) -> i32 {
         // If all pieces were placed
         if undeployed.is_empty() {
             // Return sum of all squares plus 15 bonus points.
@@ -227,9 +233,9 @@ impl GameState {
         // TODO: Track deployed shapes
         
         // If this was the last piece for this color, remove it from the turn queue
-        if undeployed.is_empty() {
-            self.last_move_mono.insert(piece.color, piece.kind == PIECE_SHAPES_BY_NAME["MONO"]);
-        }
+        // if undeployed.is_empty() {
+        //     self.last_move_mono.insert(piece.color, piece.kind == PIECE_SHAPES_BY_NAME["MONO"]);
+        // }
 
         self.try_advance(1)?;
         Ok(())
@@ -311,28 +317,6 @@ impl GameState {
             })
             .collect::<Vec<_>>()
             .into_iter()
-    }
-}
-
-impl FromXmlNode for GameState {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        Ok(Self {
-            turn: node.attribute("turn")?.parse()?,
-            round: node.attribute("round")?.parse()?,
-            first: Player::from_node(node.child_by_name("first")?)?,
-            second: Player::from_node(node.child_by_name("second")?)?,
-            board: Board::from_node(node.child_by_name("board")?)?,
-            start_piece: node.attribute("startPiece")?.parse()?,
-            start_color: Color::from_node(node.child_by_name("startColor")?)?,
-            start_team: Team::from_node(node.child_by_name("startTeam")?)?,
-            ordered_colors: node.child_by_name("orderedColors")?.childs_by_name("color").map(Color::from_node).collect::<Result<_, _>>()?,
-            last_move_mono: HashMap::new(), // TODO
-            current_color_index: node.attribute("currentColorIndex")?.parse()?,
-            blue_shapes: node.child_by_name("blueShapes")?.childs_by_name("shape").map(PieceShape::from_node).collect::<Result<_, _>>()?,
-            yellow_shapes: node.child_by_name("yellowShapes")?.childs_by_name("shape").map(PieceShape::from_node).collect::<Result<_, _>>()?,
-            red_shapes: node.child_by_name("redShapes")?.childs_by_name("shape").map(PieceShape::from_node).collect::<Result<_, _>>()?,
-            green_shapes: node.child_by_name("greenShapes")?.childs_by_name("shape").map(PieceShape::from_node).collect::<Result<_, _>>()?
-        })
     }
 }
 

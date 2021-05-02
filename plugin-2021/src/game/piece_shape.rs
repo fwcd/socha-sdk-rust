@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt, str::FromStr};
 
 use lazy_static::lazy_static;
-use socha_client_base::{error::SCError, util::SCResult, xml_node::FromXmlNode, xml_node::XmlNode};
+use socha_client_base::{error::SCError, util::SCResult};
 
 use super::{BOARD_SIZE, Vec2, ROTATIONS, Rotation};
 
@@ -260,11 +260,5 @@ impl FromStr for PieceShape {
 impl fmt::Display for PieceShape {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
-    }
-}
-
-impl FromXmlNode for PieceShape {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        node.content().parse()
     }
 }

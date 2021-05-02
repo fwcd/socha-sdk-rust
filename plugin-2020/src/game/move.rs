@@ -1,29 +1,12 @@
-use socha_client_base::xml_node::{XmlNode, XmlNodeBuilder};
-
-use crate::util::AxialCoords;
-
-use super::{Piece, PositionedField};
+use serde::{Serialize, Deserialize};
+use super::{Piece, Field};
 
 /// A transition between two game states.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Move<C=AxialCoords> {
-    SetMove { piece: Piece, destination: PositionedField<C> },
-    DragMove { start: PositionedField<C>, destination: PositionedField<C> }
-}
-
-impl From<Move> for XmlNode {
-    fn from(game_move: Move) -> Self {
-        match game_move {
-            Move::SetMove { piece, destination } => XmlNode::new("data")
-                .attribute("class", "setmove")
-                .child(piece)
-                .child(XmlNodeBuilder::from(destination).name("destination"))
-                .build(),
-            Move::DragMove { start, destination } => XmlNode::new("data")
-                .attribute("class", "dragmove")
-                .child(XmlNodeBuilder::from(start).name("start"))
-                .child(XmlNodeBuilder::from(destination).name("destination"))
-                .build()
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename = "data", tag = "class")]
+pub enum Move {
+    #[serde(rename = "setmove")]
+    SetMove { piece: Piece, destination: Field },
+    #[serde(rename = "dragmove")]
+    DragMove { start: Field, destination: Field },
 }

@@ -1,5 +1,6 @@
 use std::{convert::TryFrom, str::FromStr};
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 use socha_client_base::{error::SCError, util::SCResult};
 
 /// A game piece type.
@@ -63,5 +64,18 @@ impl From<PieceType> for String {
             PieceType::Grasshopper => "GRASSHOPPER",
             PieceType::Spider => "SPIDER"
         }.to_owned()
+    }
+}
+
+impl Serialize for PieceType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        serializer.serialize_str(String::from(*self).as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PieceType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        Self::from_str(String::deserialize(deserializer)?.as_str())
+            .map_err(|e| D::Error::custom(format!("Could not deserialize piece type: {:?}", e)))
     }
 }

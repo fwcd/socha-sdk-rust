@@ -1,28 +1,18 @@
-use socha_client_base::{util::SCResult, xml_node::{FromXmlNode, XmlNode}};
-
+use serde::{Serialize, Deserialize};
+use socha_client_base::util::serde_as_str;
 use super::{PieceType, PlayerColor};
 
 /// A game piece.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Piece {
+    #[serde(with = "serde_as_str")]
     pub owner: PlayerColor,
-    pub piece_type: PieceType
+    #[serde(rename = "type")]
+    pub piece_type: PieceType,
 }
 
-impl FromXmlNode for Piece {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        Ok(Self {
-            owner: node.attribute("owner")?.parse()?,
-            piece_type: node.attribute("type")?.parse()?
-        })
-    }
-}
-
-impl From<Piece> for XmlNode {
-    fn from(piece: Piece) -> Self {
-        XmlNode::new("piece")
-            .attribute("owner", piece.owner)
-            .attribute("type", piece.piece_type)
-            .build()
+impl Piece {
+    pub fn new(owner: PlayerColor, piece_type: PieceType) -> Self {
+        Self { owner, piece_type }
     }
 }

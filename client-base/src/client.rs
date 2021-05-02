@@ -1,13 +1,13 @@
-use std::convert::TryFrom;
-use std::net::TcpStream;
-use std::io::{self, BufWriter, BufReader, Read, Write};
+use serde::{Serialize, Deserialize};
+use std::{fmt, net::TcpStream, str::FromStr};
+use std::io::{self, BufWriter, BufReader, BufRead, Write};
 use log::{info, debug, warn, error};
-use xml::reader::{XmlEvent as XmlReadEvent, EventReader};
-use xml::writer::EmitterConfig;
-use crate::xml_node::{XmlNode, FromXmlNode};
+use quick_xml::{Reader as XmlReader, events::Event as XmlEvent};
+use quick_xml::se::to_writer;
+use quick_xml::de::from_reader;
 use crate::util::SCResult;
 use crate::plugin::{SCPlugin, HasPlayerColor, HasTurn};
-use crate::protocol::{Joined, Left, Room, Data, GameResult};
+use crate::protocol::{Packet, Joined, Left, Room, Event, GameResult};
 
 /// A handler that implements the game player's
 /// behavior, usually employing some custom move
@@ -21,7 +21,7 @@ pub trait SCClientDelegate {
     fn on_update_state(&mut self, _state: &<Self::Plugin as SCPlugin>::GameState) {}
     
     /// Invoked when the game ends.
-    fn on_game_end(&mut self, _result: GameResult<Self::Plugin>) {}
+    fn on_game_end(&mut self, _result: GameResult<<Self::Plugin as SCPlugin>::Player>) {}
     
     /// Invoked when the welcome message is received
     /// with the player's color.
@@ -48,7 +48,13 @@ pub struct SCClient<D> where D: SCClientDelegate {
     game_state: Option<<D::Plugin as SCPlugin>::GameState>
 }
 
-impl<D> SCClient<D> where D: SCClientDelegate {
+impl<D> SCClient<D>
+    where
+        D: SCClientDelegate,
+        <D::Plugin as SCPlugin>::PlayerColor: fmt::Display + FromStr,
+        <D::Plugin as SCPlugin>::Player: Serialize + for<'de> Deserialize<'de>,
+        <D::Plugin as SCPlugin>::GameState: Serialize + for<'de> Deserialize<'de>,
+        <D::Plugin as SCPlugin>::Move: Serialize + for<'de> Deserialize<'de> {
     /// Creates a new client using the specified delegate.
     pub fn new(delegate: D, debug_mode: DebugMode) -> Self {
         Self { delegate: delegate, debug_mode: debug_mode, game_state: None }
@@ -80,11 +86,11 @@ impl<D> SCClient<D> where D: SCClientDelegate {
 
         let mode = &self.debug_mode;
         if mode.debug_reader && !mode.debug_writer {
-            self.run_game(io::stdin(), BufWriter::new(stream))?;
+            self.run_game(BufReader::new(io::stdin()), BufWriter::new(stream))?;
         } else if !mode.debug_reader && mode.debug_writer {
-            self.run_game(BufReader::new(stream), io::stdout())?;
+            self.run_game(BufReader::new(stream), BufWriter::new(io::stdout()))?;
         } else if mode.debug_reader && mode.debug_writer {
-            self.run_game(io::stdin(), io::stdout())?;
+            self.run_game(BufReader::new(io::stdin()), BufWriter::new(io::stdout()))?;
         } else {
             let reader = BufReader::new(stream.try_clone()?);
             let writer = BufWriter::new(stream);
@@ -96,87 +102,71 @@ impl<D> SCClient<D> where D: SCClientDelegate {
     
     /// Blocks the thread and parses/handles game messages
     /// from the provided reader.
-    fn run_game<R, W>(mut self, reader: R, writer: W) -> SCResult<()> where R: Read, W: Write {
-        let mut xml_reader = EventReader::new(reader);
+    fn run_game<R, W>(mut self, reader: R, mut writer: W) -> SCResult<()> where R: BufRead, W: Write {
+        // Read initial <protocol> element
 
-        let mut emitter_config = EmitterConfig::new();
-        emitter_config.write_document_declaration = false;
+        let mut xml_reader = XmlReader::from_reader(reader);
+        let mut xml_buf = Vec::new();
 
-        let mut xml_writer = emitter_config.create_writer(writer);
-        
-        // Read initial protocol element
         info!("Waiting for initial <protocol>...");
-        while match xml_reader.next() {
-            Ok(XmlReadEvent::StartElement { name, .. }) => Some(name),
-            _ => None
-        }.filter(|n| n.local_name == "protocol").is_none() {}
+        while !matches!(
+            xml_reader.read_event(&mut xml_buf),
+            Ok(XmlEvent::Start(ref e)) if e.name() == "protocol".as_bytes()
+        ) {}
+
+        let mut reader = xml_reader.into_underlying_reader();
+
+        // Read incoming packets
 
         loop {
-            let node = XmlNode::read_from(&mut xml_reader)?;
-            debug!("Got XML node {}", node);
+            let packet: Packet<D::Plugin> = from_reader(&mut reader).map_err(|e| format!("Could not read packet: {:?}", e))?;
+            debug!("Got packet {:?}", packet);
             
-            match node.name() {
-                // Try parsing as room message (the game is running)
-                "room" => match <Room<D::Plugin>>::from_node(&node) {
-                    Ok(room) => match room.data {
-                        Data::WelcomeMessage { color } => {
-                            info!("Got welcome message with color: {:?}", color);
-                            self.delegate.on_welcome_message(&color);
-                        },
-                        Data::Memento { state } => {
-                            info!("Got updated game state");
-                            self.delegate.on_update_state(&state);
-                            self.game_state = Some(state);
-                        },
-                        Data::MoveRequest => {
-                            if let Some(ref state) = self.game_state {
-                                let turn = state.turn();
-                                let color = state.player_color();
-                                info!("Got move request @ turn: {}, color: {:?}", turn, color);
-
-                                let new_move = self.delegate.request_move(state, color);
-                                let move_node = XmlNode::try_from(Room::<D::Plugin> {
-                                    room_id: room.room_id,
-                                    data: Data::Move(new_move)
-                                })?;
-
-                                debug!("Sending move {}", move_node);
-                                move_node.write_to(&mut xml_writer)?;
-                                xml_writer.inner_mut().flush()?;
-                            } else {
-                                error!("Got move request, which cannot be fulfilled since no game state is present!");
-                            }
-                        },
-                        Data::GameResult(result) => {
-                            info!("Got game result: {:?}", result);
-                            self.delegate.on_game_end(result);
-                        },
-                        Data::Error { message } => {
-                            warn!("Got error from server: {}", message);
-                        },
-                        _ => warn!("Could not handle room data: {:?}", room.data)
+            match packet {
+                Packet::Room(Room { event, room_id }) => match event {
+                    Event::WelcomeMessage { color } => {
+                        info!("Got welcome message with color: {:?}", color);
+                        self.delegate.on_welcome_message(&color);
                     },
-                    Err(e) => error!("Could not parse node as room: {:?}", e)
-                },
+                    Event::Memento { state } => {
+                        info!("Got updated game state");
+                        self.delegate.on_update_state(&state);
+                        self.game_state = Some(state);
+                    },
+                    Event::MoveRequest => {
+                        if let Some(ref state) = self.game_state {
+                            let turn = state.turn();
+                            let color = state.player_color();
+                            info!("Got move request @ turn: {}, color: {:?}", turn, color);
 
-                // Try parsing as 'joined' message
-                "joined" => match Joined::from_node(&node) {
-                    Ok(joined) => info!("Joined room {}", joined.room_id),
-                    Err(e) => error!("Could not parse node as 'joined': {:?}", e)
-                },
+                            let new_move = self.delegate.request_move(state, color);
+                            let move_packet = Packet::Room(Room::<D::Plugin> {
+                                room_id: room_id,
+                                event: Event::Move { r#move: new_move }
+                            });
 
-                // Try parsing as 'left' message
-                "left" => match Left::from_node(&node) {
-                    Ok(left) => info!("Left room {}", left.room_id),
-                    Err(e) => error!("Could not parse node as 'left': {:?}", e)
+                            debug!("Sending move packet {:?}", move_packet);
+                            to_writer(&mut writer, &move_packet).map_err(|e| format!("Could not write packet: {:?}", e))?;
+                            writer.flush()?;
+                        } else {
+                            error!("Got move request, which cannot be fulfilled since no game state is present!");
+                        }
+                    },
+                    Event::Result { result } => {
+                        info!("Got game result: {:?}", result);
+                        self.delegate.on_game_end(result);
+                    },
+                    Event::Error { message } => {
+                        warn!("Got error from server: {}", message);
+                    },
+                    _ => warn!("Could not handle event: {:?}", event)
                 },
-                
-                "close" | "sc.protocol.responses.CloseConnection" => {
-                    info!("Closing connection as requested by server...");
+                Packet::Joined(Joined { room_id }) => info!("Joined room {}", room_id),
+                Packet::Left(Left { room_id }) => info!("Left room {}", room_id),
+                Packet::Close(_) => {
+                    info!("Closing connection as requested by the server...");
                     break;
-                },
-                
-                _ => warn!("Unrecognized message: <{}>", node.name())
+                }
             }
         }
         

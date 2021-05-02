@@ -1,6 +1,6 @@
 use std::{fmt, str::FromStr};
 
-use socha_client_base::{error::SCError, util::SCResult, xml_node::FromXmlNode, xml_node::XmlNode};
+use socha_client_base::{error::SCError, util::SCResult};
 
 use super::Team;
 
@@ -67,11 +67,5 @@ impl fmt::Display for Color {
             Self::Green => write!(f, "GREEN"),
             Self::None => write!(f, "NONE")
         }
-    }
-}
-
-impl FromXmlNode for Color {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        node.content().parse()
     }
 }

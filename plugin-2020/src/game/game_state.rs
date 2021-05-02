@@ -1,28 +1,30 @@
 use log::trace;
-use socha_client_base::{util::HasOpponent, util::SCResult, xml_node::FromXmlNode, xml_node::XmlNode};
-
+use serde::{Serialize, Deserialize};
+use socha_client_base::util::{HasOpponent, SCResult, serde_as_str};
 use crate::util::{Adjacentable, AxialCoords, LineFormable};
-
-use super::{Board, INITIAL_PIECE_TYPES, Move, Piece, PieceType, Player, PlayerColor, PositionedField};
+use super::{Board, INITIAL_PIECE_TYPES, Move, Piece, Pieces, PieceType, Player, PlayerColor};
 
 /// A snapshot of the game's state at
 /// a specific turn. Consists of the
 /// board and information about both players.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GameState {
     pub turn: u32,
+    #[serde(with = "serde_as_str")]
     pub start_player_color: PlayerColor,
+    #[serde(with = "serde_as_str")]
     pub current_player_color: PlayerColor,
     pub board: Board,
-    red_player: Player,
-    blue_player: Player,
-    undeployed_red_pieces: Vec<Piece>,
-    undeployed_blue_pieces: Vec<Piece>
+    red: Player,
+    blue: Player,
+    undeployed_red_pieces: Pieces,
+    undeployed_blue_pieces: Pieces
 }
 
 impl GameState {
     /// Fetches the undeployed pieces for a specific color.
-    pub fn undeployed_pieces(&self, color: PlayerColor) -> &Vec<Piece> {
+    pub fn undeployed_pieces(&self, color: PlayerColor) -> &Pieces {
         match color {
             PlayerColor::Red => &self.undeployed_red_pieces,
             PlayerColor::Blue => &self.undeployed_blue_pieces
@@ -32,8 +34,8 @@ impl GameState {
     /// Fetches the player data for a given color.
     pub fn player(&self, color: PlayerColor) -> &Player {
         match color {
-            PlayerColor::Red => &self.red_player,
-            PlayerColor::Blue => &self.blue_player
+            PlayerColor::Red => &self.red,
+            PlayerColor::Blue => &self.blue
         }
     } 
 
@@ -56,7 +58,7 @@ impl GameState {
     
     fn validate_beetle_move(&self, start: AxialCoords, destination: AxialCoords) -> SCResult<()> {
         self.validate_adjacent(start, destination)?;
-        if self.board.shared_neighbors(start, destination, None).iter().any(|(_, f)| f.has_pieces()) || self.board.field(destination).map(|f| f.has_pieces()).unwrap_or(false) {
+        if self.board.shared_neighbors(start, destination, None).iter().any(|f| f.has_pieces()) || self.board.field(destination).map(|f| f.has_pieces()).unwrap_or(false) {
             Ok(())
         } else {
             Err("Beetle has to move along swarm".into())
@@ -85,7 +87,7 @@ impl GameState {
             Err(format!("Move destination is out of bounds: {:?}", destination).into())
         } else if self.board.field(destination).map(|f| f.is_obstructed()).unwrap_or(true) {
             Err(format!("Move destination is obstructed: {:?}", destination).into())
-        } else if !self.board.fields().any(|(_, f)| f.has_pieces()) {
+        } else if !self.board.fields().any(|f| f.has_pieces()) {
             Ok(())
         } else if self.board.fields_owned_by(color).count() == 0 {
             if self.board.is_next_to(color.opponent(), destination) {
@@ -97,9 +99,9 @@ impl GameState {
             Err("Bee has to be placed in the fourth round or earlier".into())
         } else if !self.undeployed_pieces(color).contains(&piece) {
             Err("Piece is not undeployed".into())
-        } else if !self.board.neighbors(destination).any(|(_, f)| f.is_owned_by(color)) {
+        } else if !self.board.neighbors(destination).any(|f| f.is_owned_by(color)) {
             Err("Piece is not placed next to an own piece".into())
-        } else if self.board.neighbors(destination).any(|(_, f)| f.is_owned_by(color)) {
+        } else if self.board.neighbors(destination).any(|f| f.is_owned_by(color)) {
             Err("Piece must not be placed next to an opponent's piece".into())
         } else {
             Ok(())
@@ -145,8 +147,8 @@ impl GameState {
     //// Tests whether the given move is valid.
     pub fn validate_move(&self, color: PlayerColor, game_move: &Move) -> SCResult<()> {
         match game_move {
-            Move::SetMove { piece, destination } => self.validate_set_move(color, *piece, destination.coords),
-            Move::DragMove { start, destination } => self.validate_drag_move(color, start.coords, destination.coords)
+            Move::SetMove { piece, destination } => self.validate_set_move(color, *piece, destination.coords::<AxialCoords>()),
+            Move::DragMove { start, destination } => self.validate_drag_move(color, start.coords::<AxialCoords>(), destination.coords::<AxialCoords>())
         }
     }
     
@@ -161,11 +163,11 @@ impl GameState {
             if self.undeployed_pieces(opponent).len() == INITIAL_PIECE_TYPES.len() {
                 // First turn
                 trace!("Finding SetMoves during first turn...");
-                self.board.empty_fields().map(|(c, _)| c).collect()
+                self.board.empty_fields().map(|f| f.axial_coords()).collect()
             } else {
                 // Second turn
                 trace!("Finding SetMoves during second turn...");
-                self.board.fields_owned_by(opponent).flat_map(|(c, _)| self.board.empty_neighbors(c)).map(|(c, _)| c).collect()
+                self.board.fields_owned_by(opponent).flat_map(|f| self.board.empty_neighbors(f.axial_coords())).map(|f| f.axial_coords()).collect()
             }
         } else {
             trace!("Querying SetMove destinations...");
@@ -173,7 +175,7 @@ impl GameState {
         };
 
         let destinations = destination_coords.into_iter()
-            .filter_map(|c| self.board.field(c).map(|f| PositionedField { coords: c, field: f.clone() }));
+            .filter_map(|c| self.board.field(c));
         trace!("Found SetMove destinations at {:#?}", destinations);
         
         if !self.board.has_placed_bee(color) && self.turn > 5 {
@@ -181,7 +183,7 @@ impl GameState {
             destinations
                 .map(|d| Move::SetMove {
                     piece: Piece { piece_type: PieceType::Bee, owner: color },
-                    destination: d
+                    destination: d.clone()
                 })
                 .collect()
         } else {
@@ -201,18 +203,20 @@ impl GameState {
     fn possible_drag_moves(&self, color: PlayerColor) -> Vec<Move> {
         trace!("Finding possible DragMoves");
 
-        self.board.fields_owned_by(color).flat_map(|(start_coords, start_field)| {
+        self.board.fields_owned_by(color).flat_map(|start_field| {
             let mut targets: Vec<_> = self.board.swarm_boundary().collect();
 
             if start_field.piece().filter(|f| f.piece_type == PieceType::Beetle).is_some() {
-                targets.extend(self.board.neighbors(start_coords));
+                targets.extend(self.board.neighbors(start_field.axial_coords()));
             }
             
-            trace!("Drag targets from {}: {:#?}", start_coords, targets);
-            targets.into_iter()
-                .filter_map(move |(c, f)| self.validated(color, Move::DragMove {
-                    start: PositionedField { coords: start_coords, field: start_field.clone() },
-                    destination: PositionedField { coords: c, field: f.clone() }
+            trace!("Drag targets from {}: {:#?}", start_field.axial_coords(), targets);
+            targets
+                .into_iter()
+                .cloned()
+                .filter_map(move |f| self.validated(color, Move::DragMove {
+                    start: start_field.clone(),
+                    destination: f
                 }).ok())
         }).collect()
     }
@@ -225,20 +229,5 @@ impl GameState {
         let mut moves = self.possible_set_moves(color);
         moves.extend(self.possible_drag_moves(color));
         moves
-    }
-}
-
-impl FromXmlNode for GameState {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        Ok(Self {
-            turn: node.attribute("turn")?.parse()?,
-            start_player_color: node.attribute("startPlayerColor")?.parse()?,
-            current_player_color: node.attribute("currentPlayerColor")?.parse()?,
-            red_player: Player::from_node(node.child_by_name("red")?)?,
-            blue_player: Player::from_node(node.child_by_name("blue")?)?,
-            board: Board::from_node(node.child_by_name("board")?)?,
-            undeployed_red_pieces: node.child_by_name("undeployedRedPieces")?.childs_by_name("piece").map(Piece::from_node).collect::<Result<_, _>>()?,
-            undeployed_blue_pieces: node.child_by_name("undeployedBluePieces")?.childs_by_name("piece").map(Piece::from_node).collect::<Result<_, _>>()?
-        })
     }
 }

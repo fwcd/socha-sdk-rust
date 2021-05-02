@@ -1,11 +1,10 @@
+use serde::{Serialize, Deserialize};
 use std::{fmt, ops::{Add, Neg, Sub}};
-
-use socha_client_base::{util::SCResult, xml_node::{FromXmlNode, XmlNode}};
 
 /// A vector in 2D-space. The x-axis
 /// usually points to the right while
 /// the y-axis points downwards.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Vec2 {
     pub x: i32,
     pub y: i32
@@ -114,14 +113,5 @@ impl Sub for Vec2 {
 
     fn sub(self, other: Self) -> Self {
         Self::new(self.x - other.x, self.y - other.y)
-    }
-}
-
-impl FromXmlNode for Vec2 {
-    fn from_node(node: &XmlNode) -> SCResult<Self> {
-        Ok(Self {
-            x: node.attribute("x")?.parse()?,
-            y: node.attribute("y")?.parse()?
-        })
     }
 }

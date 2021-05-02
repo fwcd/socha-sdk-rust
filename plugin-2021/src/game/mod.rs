@@ -1,10 +1,13 @@
 mod board;
 mod color;
+mod colors;
 mod corner;
 mod field;
+mod fields;
 mod game_state;
 mod r#move;
 mod piece_shape;
+mod piece_shapes;
 mod piece;
 mod player;
 mod rotation;
@@ -13,11 +16,14 @@ mod vec2;
 
 pub use board::*;
 pub use color::*;
+pub use colors::*;
 pub use corner::*;
 pub use field::*;
+pub use fields::*;
 pub use game_state::*;
 pub use r#move::*;
 pub use piece_shape::*;
+pub use piece_shapes::*;
 pub use piece::*;
 pub use player::*;
 pub use rotation::*;
